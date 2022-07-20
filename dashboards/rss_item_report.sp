@@ -4,25 +4,25 @@ dashboard "rss_item_report" {
   documentation = file("./dashboards/docs/rss_item_report.md")
 
   tags = merge(local.rss_common_tags, {
-    type     = "Report"
+  type = "Report"
   })
-  
+
   input "feed_link" {
     title       = "Enter a feed link:"
     width       = 4
     type        = "text"
     placeholder = "https://example.com/feed/"
   }
-  
+
   input "category" {
     title = "Select a category:"
-    query   = query.rss_item_category
+    query = query.rss_item_category
     width = 4
     args  = {
         feed_link = self.input.feed_link.value
     }
   }
-  
+
   container {
 
     card {
@@ -32,11 +32,12 @@ dashboard "rss_item_report" {
         feed_link = self.input.feed_link.value
     }
     }
-  }  
+  }
   table {
     query = query.rss_item_table
     args  = {
         feed_link = self.input.feed_link.value
+        category = self.input.category.value
     }
   }
 
@@ -44,6 +45,16 @@ dashboard "rss_item_report" {
 
 query "rss_item_category" {
   sql = <<-EOQ
+    with category as (
+    select
+      'All' as label,
+      string_agg(distinct category,E'\',\'') as value
+    from
+      rss_item,
+      jsonb_array_elements_text(categories) as category
+    where
+      feed_link = $1
+    union (
     select
       distinct category label,
       category as value
@@ -53,7 +64,13 @@ query "rss_item_category" {
     where
       feed_link = $1
     order by
-      category;
+      category))
+    select
+      label,
+      value
+    from
+      category
+    order by label;
   EOQ
 
   param "feed_link" {}
@@ -86,7 +103,7 @@ query "rss_item_table" {
       rss_item,
       jsonb_array_elements_text(categories) as category
     where
-      feed_link = $1 and category = $2;
+      feed_link = $1 and category in ($2);
   EOQ
 
   param "feed_link" {}
