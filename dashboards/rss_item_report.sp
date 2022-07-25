@@ -8,10 +8,9 @@ dashboard "rss_item_report" {
   })
 
   input "feed_link" {
-    title       = "Enter a feed link:"
+    title       = "Select a feed link:"
     width       = 4
-    type        = "text"
-    placeholder = "https://example.com/feed/"
+    query       = query.rss_feed_link
   }
 
   input "category" {
@@ -33,13 +32,35 @@ dashboard "rss_item_report" {
         feed_link = self.input.feed_link.value
     }
   }
+  
+  container {
 
+  table {
+    title = "Channel"
+    type  = "line"
+    query = query.rss_channel_table
+    width = 6
+    args  = {
+        feed_link = self.input.feed_link.value
+    }
+  }
+  
+  chart {
+      title = "Items by Published Date"
+      width = 6
+      type  = "donut"
+      query = query.rss_item_by_published
+      args  = {
+        feed_link = self.input.feed_link.value
+      }
+  }
+}
   container {
 
     chart {
       title = "Items by Category"
       width = 6
-      type  = "column"
+      type  = "donut"
       query = query.rss_item_by_category
       args  = {
         feed_link = self.input.feed_link.value
@@ -49,7 +70,7 @@ dashboard "rss_item_report" {
     chart {
       title = "Items by Author"
       width = 6
-      type  = "column"
+      type  = "donut"
       query = query.rss_item_by_author
       args  = {
         feed_link = self.input.feed_link.value
@@ -64,17 +85,114 @@ dashboard "rss_item_report" {
         category = self.input.category.value
         author = self.input.author.value
     }
-    column "Content" {
-    wrap = "none"
-  }
   }
 
+}
+
+query "rss_feed_link" {
+  sql = <<-EOQ
+    select
+      feed_link as label,
+      feed_link as value
+    from
+      rss_channel
+    order by
+      feed_link;
+  EOQ
+}
+
+query "rss_item_category" {
+  sql = <<-EOQ
+    with categories as (
+    select
+      distinct category label,
+      category as value
+    from
+      rss_item,
+      jsonb_array_elements_text(categories) as category
+    where
+      feed_link = $1
+    union 
+    select
+      'No Category' label,
+      '' as value
+    from
+      rss_item
+    where
+      feed_link = $1 and categories is null
+    union 
+    select
+      'All' label,
+      'All' as value  
+    )
+    select 
+      label,
+      value
+    from
+      categories
+    order by label;
+  EOQ
+
+  param "feed_link" {}
+}
+
+query "rss_item_author" {
+  sql = <<-EOQ
+    with authors as (
+    select
+      case
+        when author_name is null then 'No Author'
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+      end as label,
+      case
+        when author_name is null then ''
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+      end as value
+    from
+      rss_item
+    where
+      feed_link = $1  
+    union
+    select
+      'All' label,
+      'All' as value
+    ) 
+    select 
+      label,
+      value
+    from
+      authors
+    order by label;
+  EOQ
+
+  param "feed_link" {}
+}
+
+query "rss_item_by_published" {
+  sql = <<-EOQ
+    select
+      to_char(published::date,'yyyy-mm-dd') as published_date,
+      count(*)
+    from
+      rss_item
+    where
+      feed_link = $1
+    group by
+      published_date
+    order by
+      published_date;
+  EOQ
+
+  param "feed_link" {}
 }
 
 query "rss_item_by_author" {
   sql = <<-EOQ
     select
-      regexp_replace(author_name,'<[^>]*>', '','g') as author_name,
+      case
+        when author_name is null then 'No Author'
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+        end as author_name,
       count(*)
     from
       rss_item
@@ -91,107 +209,108 @@ query "rss_item_by_author" {
 
 query "rss_item_by_category" {
   sql = <<-EOQ
+    with categories as (
+    select
+      title,
+      'No Category' as category
+    from
+      rss_item
+    where
+      feed_link = $1 and categories is null
+    union  
+    select
+      title,
+      category
+    from
+      rss_item,
+      jsonb_array_elements_text(categories) as category
+    where
+      feed_link = $1
+    )
     select
       category,
       count(*)
     from
-      rss_item,
-      jsonb_array_elements_text(categories) as category
-    where
-      feed_link = $1
+      categories
     group by
       category
     order by
-      count desc;
+      count desc    
   EOQ
 
   param "feed_link" {}
 }
 
-query "rss_item_category" {
-  sql = <<-EOQ
-    with category as (
-    select
-      'All' as label,
-      string_agg(distinct category,E',') as value
-    from
-      rss_item,
-      jsonb_array_elements_text(categories) as category
-    where
-      feed_link = $1
-    union (
-    select
-      distinct category label,
-      category as value
-    from
-      rss_item,
-      jsonb_array_elements_text(categories) as category
-    where
-      feed_link = $1
-    order by
-      category))
-    select
-      label,
-      value
-    from
-      category
-    order by label;
-  EOQ
-
-  param "feed_link" {}
-}
-
-query "rss_item_author" {
-  sql = <<-EOQ
-    with regex_author as(
-     select
-      regexp_replace(author_name,'<[^>]*>', '','g') as author_name
-    from
-      rss_item
-    where
-      feed_link = $1
-    ),
-    author as (
-    select
-      'All' as label,
-      string_agg(distinct author_name,E',') as value
-    from
-      regex_author
-    union (
-    select
-      distinct author_name label,
-      author_name as value
-    from
-      regex_author
-    order by
-      author_name))
-    select
-      label,
-      value
-    from
-      author
-    order by label;
-  EOQ
-
-  param "feed_link" {}
-}
-
-query "rss_item_table" {
+query "rss_channel_table" {
   sql = <<-EOQ
     select
       title as "Title",
       link as "Link",
-      regexp_replace(author_name,'<[^>]*>', '','g') as "Author Name",
-      author_email as "Author Email",
-      categories as "Categories",
-      published as "Published",
+      feed_type as "Feed Type",
+      language as "Language",
       updated as "Updated"
     from
-      rss_item,
-      jsonb_array_elements_text(categories) as category
+      rss_channel
     where
-      feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[]))
-      and regexp_replace(author_name,'<[^>]*>', '','g') in (select unnest (string_to_array($3, ',')::text[]))
+      link like '%'||split_part($1,'/',3)||'%';
+  EOQ
+
+  param "feed_link" {}
+}
+query "rss_item_table" {
+  sql = <<-EOQ
+    with items as(
+    select
+      title,
+      link,
+      case
+        when author_name is null then ''
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+        end as author_name,
+      categories,
+      published,
+      feed_link,
+      '' as "category"
+    from
+      rss_item
+    where
+      categories is null
+    union (
+    select
+      title,
+      link,
+      case
+        when author_name is null then ''
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+        end as author_name,
+      categories,
+      published,
+      feed_link,
+      category
+    from
+      rss_item,
+      jsonb_array_elements_text(categories) as category)
+    )
+    select
+      distinct title as "Title",
+      link as "Link",
+      author_name as "Author Name",
+      categories as "Categories",
+      published as "Published"
+    from
+      items  
+    where
+      case 
+        when ($2)::text not like '%All%' and ($3)::text not like '%All%'
+        then feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[]))
+        and author_name in (select unnest (string_to_array($3, ',')::text[]))
+        when ($2)::text not like '%All%' and ($3)::text like '%All%'
+        then feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[]))
+        when ($2)::text like '%All%'  and ($3)::text not like '%All%'
+        then feed_link = $1 and author_name in (select unnest (string_to_array($3, ',')::text[]))
+        else
+          feed_link = $1
+      end    
     order by
       published desc;
   EOQ
