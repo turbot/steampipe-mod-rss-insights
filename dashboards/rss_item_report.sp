@@ -84,7 +84,7 @@ dashboard "rss_item_report" {
   }
   
   chart {
-    title = "Items by Publication date" 
+    title = "Items by Publication Date" 
     width = 3
     query = query.rss_item_by_publication_date
     args  = {
