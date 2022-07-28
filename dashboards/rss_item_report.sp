@@ -34,15 +34,19 @@ dashboard "rss_item_report" {
   }
 
   input "published_month" {
-    title = "Select a published month:"
-    type  = "multiselect"
-    query = query.rss_item_published_month
-    width = 3
-    args  = {
-        feed_link = self.input.feed_link.value
+    title = "Select a publication time:"
+    option  "by_day" {
+    label = "By day"
     }
+    option  "by_month" {
+    label = "By month"
+    }
+    option  "by_year" {
+    label = "By year"
+    }
+    width = 3
   }
-  
+ 
   container {
 
   table {
@@ -56,35 +60,39 @@ dashboard "rss_item_report" {
   }
   
   chart {
-      title = "Items by Category"
-      width = 3
-      type  = "donut"
-      query = query.rss_item_by_category
-      args  = {
-        feed_link = self.input.feed_link.value
-        category = self.input.category.value
+    title = "Items by Category"
+    width = 3
+    type  = "donut"
+    query = query.rss_item_by_category
+    args  = {
+      feed_link = self.input.feed_link.value
+      category = self.input.category.value
+      author = self.input.author.value
     }
-    }
-     chart {
-      title = "Items by Author"
-      width = 3
-      type  = "donut"
-      query = query.rss_item_by_author
-      args  = {
-        feed_link = self.input.feed_link.value
-        author = self.input.author.value
-    }
-    }
-
-    chart {
-      title = "Items by Published Month" 
-      width = 3
-      query = query.rss_item_by_published
-      args  = {
-        feed_link = self.input.feed_link.value
-        published_month = self.input.published_month.value
-      }
   }
+    
+  chart {
+    title = "Items by Author"
+    width = 3
+    type  = "donut"
+    query = query.rss_item_by_author
+    args  = {
+      feed_link = self.input.feed_link.value
+      category = self.input.category.value
+      author = self.input.author.value
+    }
+  }
+  
+  chart {
+    title = "Items by Publication date" 
+    width = 3
+    query = query.rss_item_by_publication_date
+    args  = {
+      feed_link = self.input.feed_link.value
+      published_month = self.input.published_month.value
+    }
+  }
+
   }
 
   table {
@@ -93,7 +101,6 @@ dashboard "rss_item_report" {
         feed_link = self.input.feed_link.value
         category = self.input.category.value
         author = self.input.author.value
-        published_month = self.input.published_month.value
     }
   }
 
@@ -178,51 +185,27 @@ query "rss_item_author" {
   param "feed_link" {}
 }
 
-query "rss_item_published_month" {
-  sql = <<-EOQ
-    with published_month as (
-    select
-      to_char(published::date,'yyyy-mm') as label,
-      to_char(published::date,'yyyy-mm') as value
-    from
-      rss_item
-    where
-      feed_link = $1
-    union
-    select
-      '<All>' label,
-      '<all>' as value
-    )  
-   select 
-      label,
-      value
-    from
-      published_month
-    order by label desc;
-  EOQ
-
-  param "feed_link" {}
-}
-
-query "rss_item_by_published" {
+query "rss_item_by_publication_date" {
   sql = <<-EOQ
     select
-      to_char(published::date,'yyyy-mm') as published_month,
+      case 
+        when ($2)::text like '%by_day%'
+        then to_char(published::date,'yyyy-mm-dd')
+
+        when ($2)::text like '%by_month%'
+        then to_char(published::date,'yyyy-mm')
+
+        else to_char(published::date,'yyyy')
+      end as published_time,
       count(*)
     from
       rss_item
     where
-      case 
-        when ($2)::text not like '%<all>%'
-        then feed_link = $1 and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($2, ',')::text[]))
-         
-        else
-          feed_link = $1
-      end    
+      feed_link = $1   
     group by
-      published_month
+      published_time
     order by
-      published_month;
+      published_time;
   EOQ
 
   param "feed_link" {}
@@ -231,22 +214,67 @@ query "rss_item_by_published" {
 
 query "rss_item_by_author" {
   sql = <<-EOQ
-    select
+    with item_published as (
+    select 
+      feed_link,
+      published,
       case
-        when author_name is null then '<No author>'
+        when author_name is null then ''
         else regexp_replace(author_name,'<[^>]*>', '','g') 
         end as author_name,
-      count(*)
+      '' as "category"
     from
       rss_item
     where
+      categories is null
+    union
+    select
+      feed_link,
+      published,
+      case
+        when author_name is null then ''
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+        end as author_name,
+      category
+    from
+      rss_item,
+      jsonb_array_elements_text(categories) as category
+    )
+    select
+      distinct author_name,
+      count(*)
+    from
+      item_published
+    where
       case 
-        when ($2)::text not like '%<all>%' and ($2)::text not like '%<null>%'
-        then feed_link = $1 and regexp_replace(author_name,'<[^>]*>', '','g') in (select unnest (string_to_array($2, ',')::text[]))
+        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%')
+        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
+        and author_name in (select unnest (string_to_array($3, ',')::text[])))
+
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
+        then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
+        and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = ''))
         
-        when ($2)::text not like '%<all>%' and ($2)::text like '%<null>%'
-        then feed_link = $1 and (regexp_replace(author_name,'<[^>]*>', '','g') in (select unnest (string_to_array($2, ',')::text[])) or author_name is null)
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%')
+        then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
+        and author_name in (select unnest (string_to_array($3, ',')::text[])))
         
+        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
+        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
+        and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = ''))
+        
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and ($3)::text like '%<all>%'
+        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
+        
+        when ($2)::text like '%<all>%' and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
+        then feed_link = $1 and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = '')
+
+        when ($2)::text not like '%<all>%' and ($3)::text like '%<all>%'
+        then feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[]))
+        
+        when ($2)::text like '%<all>%' and ($3)::text not like '%<all>%'
+        then feed_link = $1 and author_name in (select unnest (string_to_array($3, ',')::text[]))
+      
         else
           feed_link = $1
       end    
@@ -257,41 +285,72 @@ query "rss_item_by_author" {
   EOQ
 
   param "feed_link" {}
+  param "category" {}
   param "author" {}
 }
 
 query "rss_item_by_category" {
   sql = <<-EOQ
-    with categories as (
-    select
-      title,
+    with item_published as (
+    select 
       feed_link,
-      '<No category>' as category
+      published,
+      case
+        when author_name is null then ''
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+        end as author_name,
+      '<No category>' as "category"
     from
       rss_item
     where
       categories is null
-    union  
+    union
     select
-      title,
       feed_link,
+      published,
+      case
+        when author_name is null then ''
+        else regexp_replace(author_name,'<[^>]*>', '','g') 
+        end as author_name,
       category
     from
       rss_item,
       jsonb_array_elements_text(categories) as category
-    )
+    ) 
     select
-      category,
+     distinct category,
       count(*)
     from
-      categories
+      item_published
     where
       case 
-        when ($2)::text not like '%<all>%' and ($2)::text not like '%<null>%'
+        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%')
+        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
+        and author_name in (select unnest (string_to_array($3, ',')::text[])))
+
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
+        then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '<No category>')
+        and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = ''))
+        
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%')
+        then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '<No category>')
+        and author_name in (select unnest (string_to_array($3, ',')::text[])))
+        
+        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
+        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
+        and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = ''))
+        
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and ($3)::text like '%<all>%'
+        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[])) or category = '<No category>')
+        
+        when ($2)::text like '%<all>%' and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
+        then feed_link = $1 and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = '')
+
+        when ($2)::text not like '%<all>%' and ($3)::text like '%<all>%'
         then feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[]))
         
-        when ($2)::text not like '%<all>%' and ($2)::text like '%<null>%'
-        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[])) or category = '<No category>')
+        when ($2)::text like '%<all>%' and ($3)::text not like '%<all>%'
+        then feed_link = $1 and author_name in (select unnest (string_to_array($3, ',')::text[]))
         
         else
           feed_link = $1
@@ -304,6 +363,7 @@ query "rss_item_by_category" {
 
   param "feed_link" {}
   param "category" {}
+  param "author" {}
 }
 
 query "rss_channel_table" {
@@ -322,6 +382,7 @@ query "rss_channel_table" {
 
   param "feed_link" {}
 }
+
 query "rss_item_table" {
   sql = <<-EOQ
     with items as(
@@ -365,66 +426,35 @@ query "rss_item_table" {
     from
       items  
     where
-      case 
-        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%') and ($4)::text not like '%<all>%'
-        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
-        and author_name in (select unnest (string_to_array($3, ',')::text[]))) and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-        
-        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%') and ($4)::text like '%<all>%'
+      case      
+        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%')
         then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
         and author_name in (select unnest (string_to_array($3, ',')::text[])))
 
-        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%') and ($4)::text not like '%<all>%'
-        then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
-        and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = '')) and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-        
-        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%') and ($4)::text like '%<all>%'
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
         then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
         and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = ''))
         
-        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%') and ($4)::text not like '%<all>%'
-        then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
-        and author_name in (select unnest (string_to_array($3, ',')::text[]))) and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-
-        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%') and ($4)::text like '%<all>%'
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text not like '%<null>%')
         then feed_link = $1 and ((category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
         and author_name in (select unnest (string_to_array($3, ',')::text[])))
         
-        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%') and ($4)::text not like '%<all>%'
-        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
-        and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = '')) and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-        
-        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%') and ($4)::text like '%<all>%'
+        when (($2)::text not like '%<all>%' and ($2)::text not like '%<null>%') and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
         then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[]))
         and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = ''))
         
-        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and ($3)::text like '%<all>%' and ($4)::text not like '%<all>%'
-        then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[])) or category = '') and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-        
-        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and ($3)::text like '%<all>%' and ($4)::text like '%<all>%'
+        when (($2)::text not like '%<all>%' and ($2)::text like '%<null>%') and ($3)::text like '%<all>%'
         then feed_link = $1 and (category in (select unnest (string_to_array($2, ',')::text[])) or category = '')
         
-        when ($2)::text like '%<all>%' and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%') and ($4)::text not like '%<all>%'
-        then feed_link = $1 and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = '') and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-        
-        when ($2)::text like '%<all>%' and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%') and ($4)::text like '%<all>%'
+        when ($2)::text like '%<all>%' and (($3)::text not like '%<all>%' and ($3)::text like '%<null>%')
         then feed_link = $1 and (author_name in (select unnest (string_to_array($3, ',')::text[])) or author_name = '')
 
-        when ($2)::text not like '%<all>%' and ($3)::text like '%<all>%' and ($4)::text not like '%<all>%'
-        then feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[])) and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-        
-        when ($2)::text not like '%<all>%' and ($3)::text like '%<all>%' and ($4)::text like '%<all>%'
+        when ($2)::text not like '%<all>%' and ($3)::text like '%<all>%'
         then feed_link = $1 and category in (select unnest (string_to_array($2, ',')::text[]))
         
-        when ($2)::text like '%<all>%' and ($3)::text not like '%<all>%' and ($4)::text not like '%<all>%'
-        then feed_link = $1 and author_name in (select unnest (string_to_array($3, ',')::text[])) and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-
-        when ($2)::text like '%<all>%' and ($3)::text not like '%<all>%' and ($4)::text like '%<all>%'
+        when ($2)::text like '%<all>%' and ($3)::text not like '%<all>%'
         then feed_link = $1 and author_name in (select unnest (string_to_array($3, ',')::text[]))
         
-        when ($2)::text like '%<all>%' and ($3)::text like '%<all>%' and ($4)::text not like '%<all>%'
-        then feed_link = $1 and to_char(published::date,'yyyy-mm') in (select unnest (string_to_array($4, ',')::text[]))
-
         else
           feed_link = $1
       end    
@@ -435,5 +465,4 @@ query "rss_item_table" {
   param "feed_link" {}
   param "category" {}
   param "author" {}
-  param "published_month" {}
 }
