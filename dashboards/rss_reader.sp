@@ -1,7 +1,7 @@
-dashboard "rss_item_report" {
+dashboard "rss_reader" {
 
-  title         = "RSS Item Report"
-  documentation = file("./dashboards/docs/rss_item_report.md")
+  title         = "RSS Reader"
+  documentation = file("./dashboards/docs/rss_reader.md")
 
   tags = merge(local.rss_common_tags, {
   type = "Report"
@@ -35,9 +35,6 @@ dashboard "rss_item_report" {
 
   input "published_month" {
     title = "Select a publication time:"
-    option  "by_day" {
-    label = "By day"
-    }
     option  "by_month" {
     label = "By month"
     }
@@ -189,9 +186,6 @@ query "rss_item_by_publication_date" {
   sql = <<-EOQ
     select
       case 
-        when ($2)::text like '%by_day%'
-        then to_char(published::date,'yyyy-mm-dd')
-
         when ($2)::text like '%by_month%'
         then to_char(published::date,'yyyy-mm')
 
