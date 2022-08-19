@@ -9,6 +9,7 @@ dashboard "rss_reader" {
 
   input "feed_link" {
     title = "Select a feed link:"
+    type  = "combo"
     width = 3
     query = query.rss_feed_link
   }
