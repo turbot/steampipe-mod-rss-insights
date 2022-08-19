@@ -1,8 +1,12 @@
-# RSS Insights Mod for Steampipe
+---
+repository: "https://github.com/turbot/steampipe-mod-rss-insights"
+---
 
-An RSS dashboarding tool that can be used to view dashboards and reports across all of your RSS Feeds.
+# RSS Insights Mod
 
-![image](https://raw.githubusercontent.com/turbot/steampipe-mod-rss-insights/main/docs/images/rss_reader_dashboard.png)
+Create dashboards and reports for your RSS Channels using Steampipe.
+
+<img src="https://raw.githubusercontent.com/turbot/steampipe-mod-rss-insights/main/docs/images/rss_reader_dashboard.png" width="50%" type="thumbnail"/>
 
 ## Overview
 
@@ -13,6 +17,16 @@ Dashboard can help answer questions like:
 - How many items were published by each author?
 - How many items were published by month or year?
 - What items were published?
+
+## References
+
+[Steampipe](https://steampipe.io) is an open source CLI to instantly query cloud APIs using SQL.
+
+[Steampipe Mods](https://steampipe.io/docs/reference/mod-resources#mod) are collections of `named queries`, codified `controls` that can be used to test current configuration of your cloud resources against a desired configuration, and `dashboards` that organize and display key pieces of information.
+
+## Documentation
+
+- **[Dashboards →](https://hub.steampipe.io/mods/turbot/rss_insights/dashboards)**
 
 ## Getting started
 
